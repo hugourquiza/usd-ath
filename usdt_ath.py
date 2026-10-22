@@ -2,19 +2,25 @@
 """Indica si el USDT/ARS está en all time high.
 
 Fuentes (públicas, sin API key):
-- Precio actual: DolarApi, "dólar cripto" (cotización USDT/ARS).
-- Histórico diario: ArgentinaDatos, misma serie "cripto" (desde feb-2023).
+- Precio actual: CriptoYa, en tiempo real. Se toma la mediana del precio de
+  venta (ask) de todos los exchanges, que no se mueve por un exchange
+  con precio disparatado.
+- Histórico diario: ArgentinaDatos, serie "dólar cripto" (desde feb-2023).
 
 Se compara el precio de venta.
 """
 
 import json
+import statistics
 import sys
+import time
 import urllib.request
 from datetime import date
 
-CURRENT_URL = "https://dolarapi.com/v1/dolares/cripto"
+CURRENT_URL = "https://criptoya.com/api/usdt/ars/1"
 HISTORY_URL = "https://api.argentinadatos.com/v1/cotizaciones/dolares/cripto"
+# Se ignoran cotizaciones de exchanges que no actualizaron en este tiempo.
+MAX_QUOTE_AGE_SECONDS = 600
 
 
 def fetch_json(url):
@@ -25,7 +31,15 @@ def fetch_json(url):
 
 def get_current_price():
     data = fetch_json(CURRENT_URL)
-    return float(data["venta"])
+    now = time.time()
+    asks = [
+        float(quote["ask"])
+        for quote in data.values()
+        if quote.get("ask") and now - quote["time"] <= MAX_QUOTE_AGE_SECONDS
+    ]
+    if not asks:
+        raise ValueError("ningún exchange tiene cotización reciente")
+    return statistics.median(asks)
 
 
 def get_history_ath():
