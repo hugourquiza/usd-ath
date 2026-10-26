@@ -1,5 +1,6 @@
 // Port a JS de usdt_ath.py: misma fuente (API pública de Binance), mismos
-// datos y mismo mensaje. Lo comparten las tres versiones de la landing.
+// datos y mismo mensaje. Lo comparten las dos versiones de la landing, que
+// muestran el dólar de la tab elegida: cripto (Binance) o CCL.
 (function () {
   // Espejo de solo lectura de api.binance.com, que bloquea algunas regiones.
   // Los pedidos salen siempre del navegador de quien visita la página.
@@ -10,10 +11,20 @@
   const CHART_INTERVAL = "2h"; // 12 velas por día: 84 en total
   const CHART_HEIGHT = 12;
 
-  async function fetchJson(path) {
-    const resp = await fetch(API_URL + path);
+  // CCL: precio en vivo de DolarApi e historial diario (desde 2013) de ArgentinaDatos.
+  const CCL_CURRENT_URL = "https://dolarapi.com/v1/dolares/contadoconliqui";
+  const CCL_HISTORY_URL = "https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui";
+  // Riesgo país de Ámbito, se muestra en las dos tabs con su crédito.
+  const RIESGO_PAIS_URL = "https://mercados.ambito.com//riesgopais/variacion";
+
+  async function getJson(url) {
+    const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return resp.json();
+  }
+
+  function fetchJson(path) {
+    return getJson(API_URL + path);
   }
 
   // Argentina no tiene horario de verano: siempre UTC-3.
@@ -86,15 +97,127 @@
     return klines.map((k) => ({ time: k[0], close: parseFloat(k[4]) }));
   }
 
-  /** Devuelve [{time, close}] de las velas de los últimos CHART_DAYS días. */
-  function getRecentCloses() {
-    return getCloses(CHART_DAYS, CHART_INTERVAL);
-  }
-
   /** Variación porcentual de las últimas 24 horas. */
   async function get24hChange() {
     const ticker = await fetchJson(`/ticker/24hr?symbol=${SYMBOL}`);
     return parseFloat(ticker.priceChangePercent);
+  }
+
+  // --- CCL ---
+
+  /** Medianoche de Argentina del día de `ms`. */
+  function dayStart(ms) {
+    return Math.floor((ms - AR_OFFSET) / 86400000) * 86400000 + AR_OFFSET;
+  }
+
+  /** Devuelve {price, time} del CCL en vivo (precio de venta). */
+  async function getCclCurrent() {
+    const ccl = await getJson(CCL_CURRENT_URL);
+    return { price: ccl.venta, time: Date.parse(ccl.fechaActualizacion) };
+  }
+
+  /**
+   * Devuelve [{time, close}] con la venta de cada día desde 2013. Se pide una
+   * sola vez por carga: ArgentinaDatos se actualiza una vez por día.
+   */
+  let cclHistoryPromise = null;
+  function getCclHistory() {
+    cclHistoryPromise ??= getJson(CCL_HISTORY_URL)
+      .then((days) => days.map((d) => ({ time: Date.parse(`${d.fecha}T00:00:00-03:00`), close: d.venta })))
+      .catch((exc) => { cclHistoryPromise = null; throw exc; });
+    return cclHistoryPromise;
+  }
+
+  /** Devuelve {price, time} del máximo histórico del CCL. */
+  async function getCclHistoryAth() {
+    const best = (await getCclHistory()).reduce((a, b) => (b.close > a.close ? b : a));
+    return { price: best.close, time: best.time };
+  }
+
+  /**
+   * Cierres diarios de los últimos `days` días (null: todos). ArgentinaDatos
+   * va atrasado y a veces repite el día anterior, así que el día de hoy sale
+   * del precio en vivo.
+   */
+  async function getCclCloses(days) {
+    const [history, current] = await Promise.all([getCclHistory(), getCclCurrent()]);
+    const today = dayStart(current.time);
+    const start = days == null ? 0 : Date.now() - days * 86400000;
+    return [...history.filter((p) => p.time >= start && p.time < today), { time: today, close: current.price }];
+  }
+
+  /** Variación porcentual contra el cierre del día anterior. */
+  async function getCclChange() {
+    const [history, current] = await Promise.all([getCclHistory(), getCclCurrent()]);
+    const prev = history.filter((p) => p.time < dayStart(current.time)).pop();
+    return (current.price / prev.close - 1) * 100;
+  }
+
+  /** "1.234,5" -> 1234.5 */
+  function parseArNumber(text) {
+    return parseFloat(text.replace(/\./g, "").replace(",", "."));
+  }
+
+  /**
+   * Devuelve {value, change, time}: el último riesgo país en puntos básicos y
+   * la variación porcentual del día.
+   */
+  async function getRiesgoPais() {
+    // {"ultimo": "765", "fecha": "26-10-2026", "variacion": "8,20%", ...}
+    const rp = await getJson(RIESGO_PAIS_URL);
+    const [d, m, y] = rp.fecha.split("-");
+    return {
+      value: parseArNumber(rp.ultimo), change: parseArNumber(rp.variacion),
+      time: Date.parse(`${y}-${m}-${d}T00:00:00-03:00`),
+    };
+  }
+
+  /** "765 pb (+8,20%)" */
+  function formatRiesgoPais({ value, change }) {
+    const sign = change > 0 ? "+" : change < 0 ? "−" : "±";
+    const pct = Math.abs(change).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `${value.toLocaleString("es-AR")} pb (${sign}${pct}%)`;
+  }
+
+  // --- Tabs: cada una es un dólar con sus fuentes ---
+
+  const SOURCES = {
+    cripto: {
+      tab: "Dólar cripto", href: "./", name: "USDT/ARS en Binance", provider: "Binance",
+      kicker: "Arde el dólar cripto", credit: "Datos públicos de Binance, precio cada 10 segundos",
+      chartNote: `cierres cada ${CHART_INTERVAL}, últimos ${CHART_DAYS} días`, changeLabel: "en 24 h",
+      daily: false, refreshMs: 10000,
+      getCurrentPrice, getHistoryAth, getCloses, get24hChange,
+      getRecentCloses: () => getCloses(CHART_DAYS, CHART_INTERVAL),
+      ranges: [
+        { key: "24h", label: "24 h", title: "Últimas 24 horas", days: 1, interval: "15m" },
+        { key: "7d", label: "7 d", title: "Últimos 7 días", days: 7, interval: "2h" },
+        { key: "30d", label: "30 d", title: "Últimos 30 días", days: 30, interval: "8h" },
+        { key: "1a", label: "1 año", title: "Último año", days: 365, interval: "1d" },
+        { key: "todo", label: "Todo", title: "Desde abril de 2023", days: null, interval: "3d" },
+      ],
+    },
+    ccl: {
+      tab: "CCL", href: "./?dolar=ccl", name: "Contado con liqui", provider: "DolarApi y ArgentinaDatos",
+      kicker: "Arde el contado con liqui", credit: "Precio de DolarApi cada minuto e historial diario de ArgentinaDatos",
+      chartNote: `cierres diarios, últimos ${CHART_DAYS} días`, changeLabel: "vs. día anterior",
+      daily: true, refreshMs: 60000,
+      getCurrentPrice: getCclCurrent, getHistoryAth: getCclHistoryAth, getCloses: getCclCloses, get24hChange: getCclChange,
+      getRecentCloses: () => getCclCloses(CHART_DAYS),
+      ranges: [
+        { key: "7d", label: "7 d", title: "Últimos 7 días", days: 7 },
+        { key: "30d", label: "30 d", title: "Últimos 30 días", days: 30 },
+        { key: "1a", label: "1 año", title: "Último año", days: 365 },
+        { key: "todo", label: "Todo", title: "Desde 2013", days: null },
+      ],
+    },
+  };
+  const source = new URLSearchParams(location.search).get("dolar") === "ccl" ? SOURCES.ccl : SOURCES.cripto;
+
+  /** Links de las tabs, con aria-current en la activa. */
+  function tabLinks() {
+    return Object.values(SOURCES).map((s) =>
+      `<a href="${s.href}"${s === source ? ' aria-current="page"' : ""}>${s.tab}</a>`).join("");
   }
 
   // Por encima de este valor del devaluómetro se muestra la versión fuego.
@@ -253,7 +376,7 @@
               `<text class="ath-label" x="${width - pad.right}" y="${yy}" dy="-0.4em" text-anchor="end">ATH ${formatArs(ath)}</text>`;
     }
     const last = points[points.length - 1];
-    return `<svg class="usdt-chart" viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Cotización USDT/ARS de los últimos ${CHART_DAYS} días">` +
+    return `<svg class="usdt-chart" viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Cotización ${source.name}">` +
       `<defs><linearGradient id="usdt-area" x1="0" y1="0" x2="0" y2="1">` +
       `<stop class="stop-top" offset="0"/><stop class="stop-bottom" offset="1"/></linearGradient></defs>` +
       grid +
@@ -312,10 +435,10 @@
    * Carga todo y llama a render({current, ath, recent, message}). Después
    * refresca el precio cada `refreshMs` y el gráfico cada 5 minutos.
    */
-  async function start(render, onError, refreshMs = 10000) {
+  async function start(render, onError, refreshMs = source.refreshMs) {
     let ath, recent;
     try {
-      const [current, a, r] = await Promise.all([getCurrentPrice(), getHistoryAth(), getRecentCloses()]);
+      const [current, a, r] = await Promise.all([source.getCurrentPrice(), source.getHistoryAth(), source.getRecentCloses()]);
       ath = a; recent = r;
       update(current);
     } catch (exc) {
@@ -331,17 +454,20 @@
     }
 
     setInterval(async () => {
-      try { update(await getCurrentPrice()); } catch (exc) { /* reintenta en el próximo tick */ }
+      try { update(await source.getCurrentPrice()); } catch (exc) { /* reintenta en el próximo tick */ }
     }, refreshMs);
     setInterval(async () => {
-      try { recent = await getRecentCloses(); } catch (exc) { /* idem */ }
+      try { recent = await source.getRecentCloses(); } catch (exc) { /* idem */ }
     }, 5 * 60 * 1000);
   }
 
+  // getCurrentPrice, getCloses, etc. son los de la tab elegida.
   window.USDT = {
-    CHART_DAYS, CHART_INTERVAL,
-    formatArs, formatDate, formatTime, athMessage, asciiChart, svgChart, attachHover,
-    getCurrentPrice, getHistoryAth, getRecentCloses, getCloses, get24hChange, start,
+    source, tabLinks,
+    getRiesgoPais, formatRiesgoPais, formatDayMonth,
+    formatArs, formatDate, formatTime, athMessage, asciiChart, svgChart, attachHover, start,
+    getCurrentPrice: source.getCurrentPrice, getHistoryAth: source.getHistoryAth,
+    getRecentCloses: source.getRecentCloses, getCloses: source.getCloses, get24hChange: source.get24hChange,
     FIRE_THRESHOLD, devaluometro, pickVersion, stayOnVersion,
   };
 })();

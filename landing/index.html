@@ -31,13 +31,19 @@
       var(--bg);
   }
   main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
-  nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 48px; }
+  nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .logo { font-weight: 700; letter-spacing: -0.02em; }
   .logo span { background: linear-gradient(90deg, var(--a), var(--b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .live { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
   .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 12px var(--ok); }
   .live.tick::before { animation: ping 0.8s ease-out; }
   @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); } 100% { box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); } }
+
+  .tabs { display: inline-flex; padding: 3px; margin-bottom: 32px; border-radius: 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); }
+  .tabs a { font-size: 14px; font-weight: 500; color: var(--muted); text-decoration: none; padding: 7px 16px; border-radius: 9px; }
+  .tabs a:hover { color: var(--text); }
+  .tabs a[aria-current] { color: var(--text); background: var(--card-hi); box-shadow: inset 0 0 0 1px var(--border); }
+  .tabs a:focus-visible { outline: 2px solid var(--b); outline-offset: 2px; }
 
   .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; border: 1px solid var(--border); background: var(--card); }
   .is-ath .badge { border-color: rgba(255, 77, 141, 0.5); color: var(--hot); box-shadow: 0 0 24px rgba(255, 77, 141, 0.3); }
@@ -88,11 +94,13 @@
   .chart-tip span { color: var(--muted); }
   .hovering .hover-line, .hovering .hover-dot, .hovering .chart-tip { opacity: 1; }
 
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } .stat:last-child { grid-column: span 2; } }
   .stat { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 16px 18px; }
   .stat span { font-size: 13px; color: var(--muted); }
   .stat b { display: block; font-size: 22px; font-weight: 500; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .rp-credit { font-size: 12px; color: var(--muted); }
+  .rp-credit a { color: inherit; }
   footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   @media (prefers-reduced-motion: reduce) { .digit .strip, .price, #chart { transition: none; } .live.tick::before { animation: none; } }
 </style>
@@ -102,14 +110,15 @@
     <div class="live" id="updated">Conectando…</div>
   </nav>
 
-  <div class="badge" id="badge">USDT/ARS en Binance</div>
+  <div class="tabs" id="tabs" role="navigation" aria-label="Dólar"></div>
+  <div><div class="badge" id="badge"></div></div>
   <div class="price-row">
     <div class="price" id="price" aria-live="polite">
       <span class="cur">$</span><span class="int odo" id="price-int">—</span><span class="dec odo" id="price-dec"></span>
     </div>
     <div class="change" id="change" hidden></div>
   </div>
-  <p class="message" id="message">Consultando Binance…</p>
+  <p class="message" id="message">Consultando…</p>
 
   <section class="chart-card">
     <div class="chart-head">
@@ -124,26 +133,28 @@
     <div class="stat"><span>Fecha del ATH</span><b id="ath-date">—</b></div>
     <div class="stat"><span>Distancia al ATH</span><b id="diff">—</b></div>
     <div class="stat"><span id="range-label">Mín. y máx. del período</span><b id="range-minmax">—</b></div>
+    <div class="stat"><span id="rp-label">Riesgo país</span><b id="rp">—</b><small class="rp-credit">Fuente: <a href="https://www.ambito.com/" target="_blank" rel="noopener">Ámbito</a></small></div>
   </div>
-  <footer>API pública de Binance · precio cada 10 s, gráfico cada 5 min</footer>
+  <footer><span id="credit"></span> · gráfico cada 5 min</footer>
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
   const pct = (v) => (v > 0 ? "+" : "") + v.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
-  const RANGES = [
-    { key: "24h", label: "24 h", title: "Últimas 24 horas", days: 1, interval: "15m" },
-    { key: "7d", label: "7 d", title: "Últimos 7 días", days: 7, interval: "2h" },
-    { key: "30d", label: "30 d", title: "Últimos 30 días", days: 30, interval: "8h" },
-    { key: "1a", label: "1 año", title: "Último año", days: 365, interval: "1d" },
-    { key: "todo", label: "Todo", title: "Desde abril de 2023", days: null, interval: "3d" },
-  ];
+  const RANGES = USDT.source.ranges;
   const tipTime = new Intl.DateTimeFormat("es-AR", {
     timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit", hour12: false,
   });
 
-  let range = RANGES[1], points = null, ath = null, lastPrice = null, lastChangeFetch = 0;
+  let range = RANGES.find((r) => r.key === "7d"), points = null, ath = null, lastPrice = null, lastChangeFetch = 0;
   try { range = RANGES.find((r) => r.key === localStorage.getItem("usdt-range")) || range; } catch (e) {}
+  $("tabs").innerHTML = USDT.tabLinks();
+  $("badge").textContent = USDT.source.name;
+  $("credit").textContent = USDT.source.credit;
+  USDT.getRiesgoPais().then((rp) => {
+    $("rp-label").textContent = `Riesgo país (${USDT.formatDayMonth(rp.time)})`;
+    $("rp").textContent = USDT.formatRiesgoPais(rp);
+  }, () => { /* queda el guion */ });
 
   // --- Precio con odómetro ---
   function setOdometer(el, text) {
@@ -184,7 +195,7 @@
     const opts = { width, height: width < 600 ? 240 : 300, ath: ath.price };
     chart.innerHTML = USDT.svgChart(points, opts);
     USDT.attachHover(chart, points, opts, (p) =>
-      `<b>${USDT.formatArs(p.close)}</b><span>${range.days != null && range.days <= 30 ? tipTime.format(p.time) : USDT.formatDate(p.time)}</span>`);
+      `<b>${USDT.formatArs(p.close)}</b><span>${range.days != null && range.days <= 30 && !USDT.source.daily ? tipTime.format(p.time) : USDT.formatDate(p.time)}</span>`);
     const closes = points.map((p) => p.close);
     $("range-label").textContent = `Mín. y máx. (${range.label})`;
     $("range-minmax").textContent =
@@ -193,7 +204,7 @@
   async function loadChart() {
     const wanted = range;
     $("chart").classList.add("loading");
-    $("chart-title").textContent = `${wanted.title} · velas de ${wanted.interval}`;
+    $("chart-title").textContent = `${wanted.title} · ${USDT.source.daily ? "cierres diarios" : `velas de ${wanted.interval}`}`;
     try {
       const data = await USDT.getCloses(wanted.days, wanted.interval);
       if (wanted !== range) return; // el usuario ya eligió otro período
@@ -225,7 +236,7 @@
     try {
       const change = await USDT.get24hChange();
       $("change").hidden = false;
-      $("change").textContent = `${pct(change)} en 24 h`;
+      $("change").textContent = `${pct(change)} ${USDT.source.changeLabel}`;
       $("change").className = "change " + (change >= 0 ? "pos" : "neg");
     } catch (exc) { /* se reintenta en la próxima actualización */ }
   }
@@ -237,7 +248,7 @@
     setPrice(current.price);
     document.body.classList.toggle("is-ath", message.isAth);
     $("message").textContent = message.text;
-    $("badge").textContent = message.isAth ? "🔥 Nuevo all time high" : "USDT/ARS en Binance";
+    $("badge").textContent = message.isAth ? "🔥 Nuevo all time high" : USDT.source.name;
     $("ath").textContent = USDT.formatArs(ath.price);
     $("ath-date").textContent = USDT.formatDate(ath.time);
     $("diff").textContent = pct((current.price / ath.price - 1) * 100);
@@ -247,7 +258,7 @@
     if (firstAth) drawChart(); // el gráfico necesita el ATH para la línea punteada
     refreshChange();
   }, (exc) => {
-    $("message").textContent = `No se pudo consultar la API de Binance (${exc.message}). Recargá la página para reintentar.`;
+    $("message").textContent = `No se pudo consultar ${USDT.source.provider} (${exc.message}). Recargá la página para reintentar.`;
   });
 </script>
 </template>
@@ -267,6 +278,12 @@
   #fire { position: absolute; left: 0; top: 0; bottom: -8px; /* esconde el borde que deja el blur */ width: 100%; height: calc(100% + 8px); z-index: 0; filter: blur(3px) saturate(1.3); mix-blend-mode: screen; }
   .hero > *:not(canvas) { position: relative; z-index: 1; }
   .hero::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 92px; z-index: 0; background: linear-gradient(transparent, var(--black)); }
+  .tabs { display: flex; gap: 6px; margin: 0 0 28px; }
+  .tabs a { padding: 6px 18px; font: 400 18px/1.2 "Anton", sans-serif; letter-spacing: 0.03em; color: var(--ash); text-decoration: none;
+    background: rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 80, 40, 0.5); }
+  .tabs a:hover { color: #fff; }
+  .tabs a[aria-current] { color: var(--black); background: var(--yellow); border-color: var(--yellow); }
+  .tabs a:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
   .kicker { margin: 0; font: 400 clamp(22px, 4vw, 36px)/1 "Anton", sans-serif; color: var(--yellow); letter-spacing: 0.04em; }
   .price {
     margin: 8px 0 0; font: 400 clamp(88px, 21vw, 260px)/0.92 "Anton", sans-serif; letter-spacing: 0.01em;
@@ -310,11 +327,13 @@
   .chart-tip b { display: block; font: 400 20px "Anton", sans-serif; }
   .hovering .hover-line, .hovering .hover-dot, .hovering .chart-tip { opacity: 1; }
 
-  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 28px; border: 2px solid var(--red); }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin-top: 28px; border: 2px solid var(--red); }
   .facts div { padding: 14px 18px; }
   .facts div + div { border-left: 2px solid var(--red); }
   .facts dt { color: var(--ash); font-size: 16px; }
   .facts dd { margin: 0; font: 400 clamp(24px, 3.4vw, 34px)/1.15 "Anton", sans-serif; }
+  .facts .rp-credit { margin: 0; font-size: 15px; color: var(--ash); }
+  .facts .rp-credit a { color: inherit; }
   @media (max-width: 640px) { .facts { grid-template-columns: 1fr; } .facts div + div { border-left: 0; border-top: 2px solid var(--red); } }
   footer { margin-top: 28px; color: var(--ash); font-size: 15px; }
 
@@ -322,9 +341,10 @@
 </style>
 <section class="hero">
   <canvas id="fire" aria-hidden="true"></canvas>
-  <p class="kicker">Arde el dólar cripto</p>
+  <nav class="tabs" id="tabs" aria-label="Dólar"></nav>
+  <p class="kicker" id="kicker"></p>
   <h1 class="price" id="price">$…</h1>
-  <p class="message" id="message">Prendiendo la parrilla de Binance…</p>
+  <p class="message" id="message">Prendiendo la parrilla…</p>
   <p class="gap" id="gap"></p>
   <div class="meter" id="meter" hidden>
     <div class="meter-head"><span>Devaluómetro</span><b id="meter-value">—</b></div>
@@ -340,8 +360,9 @@
     <div><dt>Récord histórico</dt><dd id="ath">—</dd></div>
     <div><dt>Fecha del récord</dt><dd id="ath-date">—</dd></div>
     <div><dt>Última actualización</dt><dd id="updated">—</dd></div>
+    <div><dt id="rp-label">Riesgo país</dt><dd id="rp">—</dd><dd class="rp-credit">Fuente: <a href="https://www.ambito.com/" target="_blank" rel="noopener">Ámbito</a></dd></div>
   </dl>
-  <footer>Datos públicos de Binance, precio cada 10 segundos. El devaluómetro mide cuánto subió el dólar desde el mínimo de la semana hasta el récord: al 100%, está en all time high.</footer>
+  <footer><span id="credit"></span>. El devaluómetro mide cuánto subió el dólar desde el mínimo de la semana hasta el récord: al 100%, está en all time high.</footer>
 </section>
 
 <script>
@@ -349,6 +370,13 @@
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let heat = 0.6; // 0 a 1: qué tan cerca del ATH está; la altura de las llamas depende de esto
   let isAth = false; // en all time high se prende fuego todo el hero
+  $("tabs").innerHTML = USDT.tabLinks();
+  $("kicker").textContent = USDT.source.kicker;
+  $("credit").textContent = USDT.source.credit;
+  USDT.getRiesgoPais().then((rp) => {
+    $("rp-label").textContent = `Riesgo país (${USDT.formatDayMonth(rp.time)})`;
+    $("rp").textContent = USDT.formatRiesgoPais(rp);
+  }, () => { /* queda el guion */ });
 
   // --- Llamas: el algoritmo de fuego del DOOM, todo en rojos ---
   (function fire() {
@@ -426,21 +454,21 @@
     const width = Math.max(320, chart.clientWidth);
     const opts = { width, height: width < 600 ? 240 : 300, ath: ath.price };
     chart.innerHTML = USDT.svgChart(recent, opts);
-    USDT.attachHover(chart, recent, opts, (p) => `<b>${USDT.formatArs(p.close)}</b>${USDT.formatTime(p.time).slice(0, 16)}`);
-    $("chart-sub").textContent = `cierres cada ${USDT.CHART_INTERVAL}, últimos ${USDT.CHART_DAYS} días`;
+    USDT.attachHover(chart, recent, opts, (p) => `<b>${USDT.formatArs(p.close)}</b>${USDT.source.daily ? USDT.formatDate(p.time) : USDT.formatTime(p.time).slice(0, 16)}`);
+    $("chart-sub").textContent = USDT.source.chartNote;
 
     $("ath").textContent = USDT.formatArs(ath.price);
     $("ath-date").textContent = USDT.formatDate(ath.time);
     $("updated").textContent = USDT.formatTime(current.time).slice(11);
   }, (exc) => {
-    $("message").textContent = `No se pudo consultar la API de Binance (${exc.message}). Recargá la página para reintentar.`;
+    $("message").textContent = `No se pudo consultar ${USDT.source.provider} (${exc.message}). Recargá la página para reintentar.`;
   });
 </script>
 </template>
 
 <script src="usdt.js"></script>
 <script>
-  // Una sola URL: el navegador consulta Binance, calcula el devaluómetro y
+  // Una URL por tab: el navegador consulta ese dólar, calcula el devaluómetro y
   // monta la versión que corresponde (fuego por encima de FIRE_THRESHOLD,
   // moderna por debajo). Si falla la API, monta la moderna, que muestra el error.
   function mount(version) {
