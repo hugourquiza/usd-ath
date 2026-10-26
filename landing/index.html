@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>USDT/ARS ATH</title>
+<title>¿Está el dólar en ATH en Argentina?</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Anton&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -14,7 +14,7 @@
 <body>
 <p id="loading">Midiendo el devaluómetro…</p>
 
-<template id="v-moderno" data-title="USDT/ARS Live">
+<template id="v-moderno" data-title="¿Está el dólar en ATH en Argentina?">
 <style>
   :root {
     --bg: #07070c; --card: rgba(255, 255, 255, 0.04); --card-hi: rgba(255, 255, 255, 0.07); --border: rgba(255, 255, 255, 0.08);
@@ -252,7 +252,7 @@
 </script>
 </template>
 
-<template id="v-fuego" data-title="Fuego USDT/ARS">
+<template id="v-fuego" data-title="¿Está el dólar en ATH en Argentina?">
 <style>
   :root {
     --black: #0a0000; --blood: #2b0302; --red: #ff1f0f; --orange: #ff6a00; --yellow: #ffd23f; --ash: #d9a79f;
@@ -263,7 +263,7 @@
 
   .hero { position: relative; display: flex; flex-direction: column; align-items: center;
     text-align: center; padding: 48px 16px 110px; background: radial-gradient(80% 60% at 50% 100%, #5a0700 0%, var(--blood) 45%, var(--black) 100%); overflow: hidden; }
-  /* Cubre todo el hero: al 100% del devaluómetro las llamas llegan hasta arriba. */
+  /* Cubre todo el hero: en all time high las llamas llegan hasta arriba. */
   #fire { position: absolute; left: 0; top: 0; bottom: -8px; /* esconde el borde que deja el blur */ width: 100%; height: calc(100% + 8px); z-index: 0; filter: blur(3px) saturate(1.3); mix-blend-mode: screen; }
   .hero > *:not(canvas) { position: relative; z-index: 1; }
   .hero::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 92px; z-index: 0; background: linear-gradient(transparent, var(--black)); }
@@ -348,6 +348,7 @@
   const $ = (id) => document.getElementById(id);
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let heat = 0.6; // 0 a 1: qué tan cerca del ATH está; la altura de las llamas depende de esto
+  let isAth = false; // en all time high se prende fuego todo el hero
 
   // --- Llamas: el algoritmo de fuego del DOOM, todo en rojos ---
   (function fire() {
@@ -365,12 +366,15 @@
     const img = ctx.createImageData(W, H);
 
     function step() {
-      // La altura visible de las llamas es el devaluómetro: al 50% llegan a la
-      // mitad del hero, al 100% (ATH) hasta arriba. Un pixel se ve a partir de
-      // VISIBLE en la paleta, así que cada fila enfría en promedio lo justo para
-      // bajar de 36 a VISIBLE en heat * H filas.
+      // Fuera del ATH la altura visible de las llamas es el devaluómetro medido
+      // hasta el mensaje: al 100% llegan a la mitad de "No está en all time
+      // high…". En el ATH pasan el borde de arriba y se prende fuego todo.
+      // Un pixel se ve a partir de VISIBLE en la paleta, así que cada fila
+      // enfría en promedio lo justo para bajar de 36 a VISIBLE en reach * H filas.
       const VISIBLE = 10;
-      const cool = (36 - VISIBLE) / (H * Math.max(0.05, heat));
+      const hero = canvas.parentElement.getBoundingClientRect(), msg = $("message").getBoundingClientRect();
+      const reach = isAth ? 1.2 : heat * (hero.bottom - (msg.top + msg.bottom) / 2) / hero.height;
+      const cool = (36 - VISIBLE) / (H * Math.max(0.05, reach));
       for (let x = 0; x < W; x++) {
         for (let y = 1; y < H; y++) {
           const src = y * W + x, v = px[src];
@@ -382,7 +386,7 @@
       }
       for (let i = 0; i < px.length; i++) {
         const [r, g, b] = palette[px[i]];
-        img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = px[i] ? 255 : 0;
+        img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = px[i] >= VISIBLE ? 255 : Math.round(255 * (px[i] / VISIBLE) ** 3); // la cola fría se desvanece en vez de dejar bruma
       }
       ctx.putImageData(img, 0, 0);
     }
@@ -404,6 +408,7 @@
     lastPrice = current.price;
 
     $("message").textContent = message.text;
+    isAth = message.isAth;
     $("gap").textContent = message.isAth
       ? "Récord. Se prende fuego todo."
       : `Faltan ${USDT.formatArs(ath.price - current.price)} para el récord`;
