@@ -1,0 +1,17 @@
+// Worker solo de assets estáticos: index.html le pide los datos a la API de
+// Binance desde el navegador de quien entra y elige ahí qué versión mostrar.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "usd-ath",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "dolar-ath.com.ar", "custom_domain": true },
+    { "pattern": "www.dolar-ath.com.ar", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "./landing",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  }
+}

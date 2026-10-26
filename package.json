@@ -1,0 +1,17 @@
+{
+  "name": "usd-ath",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Landings con la cotización en vivo del USDT/ARS y si está en all time high",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hugourquiza/usd-ath.git"
+  },
+  "devDependencies": {
+    "wrangler": "^4.152.0"
+  }
+}
